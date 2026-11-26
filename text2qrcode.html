@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>QR 產生器</title>
+<meta name="theme-color" content="#111111">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="QR 產生器">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" id="appleIcon" href="">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root { color-scheme: light dark; --bg:#f2f2f7; --fg:#111; --card:#fff; --border:#d1d1d6; --accent:#0a84ff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#000; --fg:#f2f2f7; --card:#1c1c1e; --border:#3a3a3c; }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; height:100%; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "PingFang TC", sans-serif;
+    display: flex; flex-direction: column;
+    height: 100dvh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    overscroll-behavior: none;
+  }
+  #qrArea {
+    flex: 1; min-height: 0; padding: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #qrBox {
+    background: #fff; border-radius: 16px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 12px rgba(0,0,0,.15);
+    overflow: hidden;
+  }
+  #qr { display:block; width:100%; height:100%; }
+  #placeholder {
+    color:#888; text-align:center; padding:24px; font-size:15px; line-height:1.6;
+  }
+  #panel {
+    padding: 12px 16px 16px;
+    background: var(--card);
+    border-top: 1px solid var(--border);
+    border-radius: 20px 20px 0 0;
+  }
+  textarea {
+    width:100%; height: 96px; resize:none;
+    font: inherit; font-size:16px; /* 16px 避免 iOS 自動放大 */
+    color: var(--fg); background: var(--bg);
+    border:1px solid var(--border); border-radius:12px; padding:10px 12px;
+    outline:none;
+  }
+  textarea:focus { border-color: var(--accent); }
+  .row { display:flex; gap:8px; margin-top:10px; align-items:center; }
+  .row > * { font: inherit; font-size:15px; }
+  select, button {
+    color: var(--fg); background: var(--bg);
+    border:1px solid var(--border); border-radius:10px; padding:9px 12px;
+  }
+  button:active { opacity:.6; }
+  .grow { flex:1; }
+  #info { font-size:12px; color:#8e8e93; margin-top:8px; min-height:1em; }
+  #help {
+    display:none; margin-top:10px; font-size:14px; line-height:1.6;
+    background: var(--bg); border-radius:12px; padding:10px 12px;
+  }
+  #help.show { display:block; }
+</style>
+</head>
+<body>
+
+<div id="qrArea">
+  <div id="qrBox">
+    <canvas id="qr" hidden></canvas>
+    <div id="placeholder">在下方輸入文字<br>即會即時產生 QR Code</div>
+  </div>
+</div>
+
+<div id="panel">
+  <textarea id="text" placeholder="輸入網址或文字…" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+  <div class="row">
+    <select id="ecc" title="容錯率">
+      <option value="0">容錯 L</option>
+      <option value="1" selected>容錯 M</option>
+      <option value="2">容錯 Q</option>
+      <option value="3">容錯 H</option>
+    </select>
+    <button id="clear">清除</button>
+    <span class="grow"></span>
+    <button id="installBtn">加到主畫面</button>
+  </div>
+  <div id="info"></div>
+  <div id="help"></div>
+</div>
+
+<script>
+/* ========== QR Code 編碼器 (Byte mode, UTF-8, Version 1–40) ========== */
+const ECC_CW = [
+ [-1,7,10,15,20,26,18,20,24,30,18,20,24,26,30,22,24,28,30,28,28,28,28,30,30,26,28,30,30,30,30,30,30,30,30,30,30,30,30,30,30],
+ [-1,10,16,26,18,24,16,18,22,22,26,30,22,22,24,24,28,28,26,26,26,26,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28],
+ [-1,13,22,18,26,18,24,18,22,20,24,28,26,24,20,30,24,28,28,26,30,28,30,30,30,30,28,30,30,30,30,30,30,30,30,30,30,30,30,30,30],
+ [-1,17,28,22,16,22,28,26,26,24,28,24,28,22,24,24,30,28,28,26,28,30,24,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30]];
+const ECC_BLK = [
+ [-1,1,1,1,1,1,2,2,2,2,4,4,4,4,4,6,6,6,6,7,8,8,9,9,10,12,12,12,13,14,15,16,17,18,19,19,20,21,22,24,25],
+ [-1,1,1,1,2,2,4,4,4,5,5,5,8,9,9,10,10,11,13,14,16,17,17,18,20,21,23,25,26,28,29,31,33,35,37,38,40,43,45,47,49],
+ [-1,1,1,2,2,4,4,6,6,8,8,8,10,12,16,12,17,16,18,21,20,23,23,25,27,29,34,34,35,38,40,43,45,48,51,53,56,59,62,65,68],
+ [-1,1,1,2,4,4,4,5,6,8,8,11,11,16,16,18,16,19,21,25,25,25,34,30,32,35,37,40,42,45,48,51,54,57,60,63,66,70,74,77,81]];
+const FMT_BITS = [1,0,3,2]; // L M Q H
+
+function rawModules(v){
+  let r = (16*v+128)*v+64;
+  if (v>=2){ const n=Math.floor(v/7)+2; r -= (25*n-10)*n-55; if (v>=7) r -= 36; }
+  return r;
+}
+function dataCw(v,e){ return Math.floor(rawModules(v)/8) - ECC_CW[e][v]*ECC_BLK[e][v]; }
+
+function gfMul(x,y){
+  let z=0;
+  for (let i=7;i>=0;i--){ z=(z<<1)^((z>>>7)*0x11D); z^=((y>>>i)&1)*x; }
+  return z;
+}
+function rsDivisor(d){
+  const r=new Array(d).fill(0); r[d-1]=1; let root=1;
+  for (let i=0;i<d;i++){
+    for (let j=0;j<d;j++){ r[j]=gfMul(r[j],root); if (j+1<d) r[j]^=r[j+1]; }
+    root=gfMul(root,2);
+  }
+  return r;
+}
+function rsRemainder(data,div){
+  const r=new Array(div.length).fill(0);
+  for (const b of data){
+    const f=b^r.shift(); r.push(0);
+    div.forEach((c,i)=>{ r[i]^=gfMul(c,f); });
+  }
+  return r;
+}
+
+function qrEncode(bytes, e){
+  let v;
+  for (v=1; v<=40; v++){
+    if (4+(v<10?8:16)+bytes.length*8 <= dataCw(v,e)*8) break;
+  }
+  if (v>40) return null;
+
+  // --- 資料位元流 ---
+  const bits=[];
+  const put=(val,len)=>{ for(let i=len-1;i>=0;i--) bits.push((val>>>i)&1); };
+  put(4,4); put(bytes.length, v<10?8:16); bytes.forEach(b=>put(b,8));
+  const cap=dataCw(v,e)*8;
+  put(0, Math.min(4, cap-bits.length));
+  put(0, (8-bits.length%8)%8);
+  for (let p=0xEC; bits.length<cap; p^=0xEC^0x11) put(p,8);
+  const data=[];
+  for (let i=0;i<bits.length;i+=8){
+    let b=0; for(let j=0;j<8;j++) b=(b<<1)|bits[i+j]; data.push(b);
+  }
+
+  // --- Reed-Solomon 與交錯 ---
+  const nb=ECC_BLK[e][v], eccLen=ECC_CW[e][v];
+  const raw=Math.floor(rawModules(v)/8);
+  const nShort=nb-raw%nb, shortLen=Math.floor(raw/nb);
+  const div=rsDivisor(eccLen);
+  const blocks=[]; let off=0;
+  for (let i=0;i<nb;i++){
+    const k=shortLen-eccLen+(i<nShort?0:1);
+    const dat=data.slice(off,off+k); off+=k;
+    const ecc=rsRemainder(dat,div);
+    if (i<nShort) dat.push(0);
+    blocks.push(dat.concat(ecc));
+  }
+  const all=[];
+  for (let i=0;i<blocks[0].length;i++)
+    blocks.forEach((blk,j)=>{ if (i!==shortLen-eccLen || j>=nShort) all.push(blk[i]); });
+
+  // --- 繪製矩陣 ---
+  const size=v*4+17;
+  const m=Array.from({length:size},()=>new Array(size).fill(false));
+  const fn=Array.from({length:size},()=>new Array(size).fill(false));
+  const setF=(x,y,c)=>{ m[y][x]=c; fn[y][x]=true; };
+
+  for (let i=0;i<size;i++){ setF(6,i,i%2===0); setF(i,6,i%2===0); }
+  const finder=(cx,cy)=>{
+    for (let dy=-4;dy<=4;dy++) for (let dx=-4;dx<=4;dx++){
+      const x=cx+dx,y=cy+dy; if (x<0||y<0||x>=size||y>=size) continue;
+      const d=Math.max(Math.abs(dx),Math.abs(dy)); setF(x,y,d!==2&&d!==4);
+    }
+  };
+  finder(3,3); finder(size-4,3); finder(3,size-4);
+
+  if (v>1){
+    const n=Math.floor(v/7)+2;
+    const step=(v===32)?26:Math.ceil((v*4+4)/(n*2-2))*2;
+    const pos=[6];
+    for (let p=size-7; pos.length<n; p-=step) pos.splice(1,0,p);
+    for (let i=0;i<n;i++) for (let j=0;j<n;j++){
+      if ((i===0&&j===0)||(i===0&&j===n-1)||(i===n-1&&j===0)) continue;
+      for (let dy=-2;dy<=2;dy++) for (let dx=-2;dx<=2;dx++)
+        setF(pos[i]+dx,pos[j]+dy,Math.max(Math.abs(dx),Math.abs(dy))!==1);
+    }
+  }
+
+  const bit=(x,i)=>((x>>>i)&1)!==0;
+  const drawFormat=(mask)=>{
+    const d=(FMT_BITS[e]<<3)|mask; let rem=d;
+    for (let i=0;i<10;i++) rem=(rem<<1)^((rem>>>9)*0x537);
+    const b=((d<<10)|rem)^0x5412;
+    for (let i=0;i<=5;i++) setF(8,i,bit(b,i));
+    setF(8,7,bit(b,6)); setF(8,8,bit(b,7)); setF(7,8,bit(b,8));
+    for (let i=9;i<15;i++) setF(14-i,8,bit(b,i));
+    for (let i=0;i<8;i++) setF(size-1-i,8,bit(b,i));
+    for (let i=8;i<15;i++) setF(8,size-15+i,bit(b,i));
+    setF(8,size-8,true);
+  };
+  drawFormat(0);
+  if (v>=7){
+    let rem=v;
+    for (let i=0;i<12;i++) rem=(rem<<1)^((rem>>>11)*0x1F25);
+    const b=(v<<12)|rem;
+    for (let i=0;i<18;i++){
+      const c=bit(b,i), a=size-11+i%3, k=Math.floor(i/3);
+      setF(a,k,c); setF(k,a,c);
+    }
+  }
+
+  // --- 放入資料 ---
+  let idx=0;
+  for (let right=size-1; right>=1; right-=2){
+    if (right===6) right=5;
+    for (let vert=0; vert<size; vert++){
+      for (let j=0;j<2;j++){
+        const x=right-j, upward=((right+1)&2)===0;
+        const y=upward?size-1-vert:vert;
+        if (!fn[y][x] && idx<all.length*8){
+          m[y][x]=bit(all[idx>>>3],7-(idx&7)); idx++;
+        }
+      }
+    }
+  }
+
+  // --- 遮罩 ---
+  const applyMask=(k)=>{
+    for (let y=0;y<size;y++) for (let x=0;x<size;x++){
+      let inv;
+      switch(k){
+        case 0: inv=(x+y)%2===0; break;
+        case 1: inv=y%2===0; break;
+        case 2: inv=x%3===0; break;
+        case 3: inv=(x+y)%3===0; break;
+        case 4: inv=(Math.floor(x/3)+Math.floor(y/2))%2===0; break;
+        case 5: inv=x*y%2+x*y%3===0; break;
+        case 6: inv=(x*y%2+x*y%3)%2===0; break;
+        default: inv=((x+y)%2+x*y%3)%2===0;
+      }
+      if (!fn[y][x] && inv) m[y][x]=!m[y][x];
+    }
+  };
+  const penalty=()=>{
+    let p=0, dark=0;
+    for (let t=0;t<2;t++) for (let a=0;a<size;a++){
+      const line=[]; for (let b=0;b<size;b++) line.push(t?m[b][a]:m[a][b]);
+      let run=1;
+      for (let b=1;b<=size;b++){
+        if (b<size && line[b]===line[b-1]) run++;
+        else { if (run>=5) p+=run-2; run=1; }
+      }
+      const s=line.map(c=>c?1:0).join('');
+      for (let i=0;i<=size-11;i++)
+        if (s.startsWith('10111010000',i)||s.startsWith('00001011101',i)) p+=40;
+    }
+    for (let y=0;y<size;y++) for (let x=0;x<size;x++){
+      if (m[y][x]) dark++;
+      if (x<size-1&&y<size-1&&m[y][x]===m[y][x+1]&&m[y][x]===m[y+1][x]&&m[y][x]===m[y+1][x+1]) p+=3;
+    }
+    const total=size*size;
+    p+=(Math.ceil(Math.abs(dark*20-total*10)/total)-1)*10;
+    return p;
+  };
+  let best=0, bestP=Infinity;
+  for (let k=0;k<8;k++){
+    applyMask(k); drawFormat(k);
+    const p=penalty(); if (p<bestP){ bestP=p; best=k; }
+    applyMask(k);
+  }
+  applyMask(best); drawFormat(best);
+  return { size, version:v, modules:m };
+}
+
+/* ========== UI ========== */
+const $ = id => document.getElementById(id);
+const canvas=$('qr'), ctx=canvas.getContext('2d');
+const input=$('text'), eccSel=$('ecc'), info=$('info'), ph=$('placeholder'), box=$('qrBox'), area=$('qrArea');
+
+function drawQR(q, target, fg='#000', bg='#fff', quiet=4){
+  const n=q.size+quiet*2;
+  const scale=Math.max(4, Math.ceil(640/n));
+  target.width=target.height=n*scale;
+  const c=target.getContext('2d');
+  c.fillStyle=bg; c.fillRect(0,0,target.width,target.height);
+  c.fillStyle=fg;
+  for (let y=0;y<q.size;y++) for (let x=0;x<q.size;x++)
+    if (q.modules[y][x]) c.fillRect((x+quiet)*scale,(y+quiet)*scale,scale,scale);
+}
+
+function layout(){
+  const side=Math.floor(Math.min(area.clientWidth-32, area.clientHeight-32, 480));
+  const s=Math.max(120, side);
+  box.style.width=box.style.height=s+'px';
+}
+
+function render(){
+  const text=input.value;
+  if (!text){
+    canvas.hidden=true; ph.hidden=false;
+    ph.innerHTML='在下方輸入文字<br>即會即時產生 QR Code'; info.textContent=''; return;
+  }
+  const q=qrEncode(new TextEncoder().encode(text), +eccSel.value);
+  if (!q){
+    canvas.hidden=true; ph.hidden=false; ph.textContent='內容太長,無法產生 QR Code,請縮短文字或降低容錯率。';
+    info.textContent=''; return;
+  }
+  ph.hidden=true; canvas.hidden=false;
+  drawQR(q, canvas);
+  info.textContent=`版本 ${q.version} · ${q.size}×${q.size} · ${new TextEncoder().encode(text).length} bytes`;
+}
+
+input.addEventListener('input', render);
+eccSel.addEventListener('change', render);
+$('clear').addEventListener('click', ()=>{ input.value=''; render(); input.focus(); });
+window.addEventListener('resize', layout);
+if (window.visualViewport) visualViewport.addEventListener('resize', layout);
+
+// 允許用 ?t=文字 預填(可用來做捷徑)
+const pre=new URLSearchParams(location.search).get('t');
+if (pre) input.value=pre;
+layout(); render();
+new ResizeObserver(layout).observe(area);
+
+/* ========== 加到主畫面 (PWA) ========== */
+(function setupPWA(){
+  // iOS 的主畫面圖示:用程式畫出 PNG
+  const q=qrEncode(new TextEncoder().encode('QR'), 1);
+  const c=document.createElement('canvas'); c.width=c.height=180;
+  const t=c.getContext('2d');
+  t.fillStyle='#111'; t.fillRect(0,0,180,180);
+  const pad=180*0.14, cell=(180-pad*2)/q.size;
+  t.fillStyle='#fff';
+  for (let y=0;y<q.size;y++) for (let x=0;x<q.size;x++)
+    if (q.modules[y][x]) t.fillRect(pad+x*cell, pad+y*cell, Math.ceil(cell), Math.ceil(cell));
+  $('appleIcon').href=c.toDataURL('image/png');
+
+  // 註冊 Service Worker(離線用)
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+})();
+
+const isStandalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+const installBtn=$('installBtn'), help=$('help');
+if (isStandalone) installBtn.hidden=true;
+
+let deferred=null;
+window.addEventListener('beforeinstallprompt', e=>{ e.preventDefault(); deferred=e; });
+window.addEventListener('appinstalled', ()=>{ installBtn.hidden=true; help.classList.remove('show'); });
+
+installBtn.addEventListener('click', async ()=>{
+  if (deferred){ deferred.prompt(); await deferred.userChoice; deferred=null; return; }
+  const ua=navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua)){
+    help.innerHTML='<b>iPhone / iPad(請使用 Safari)</b><br>點下方「分享」按鈕 <b>⎙</b> → 選「加入主畫面」→ 點「新增」。';
+  } else if (/Android/.test(ua)){
+    help.innerHTML='<b>Android(Chrome)</b><br>點右上角「⋮」選單 → 選「加到主畫面」或「安裝應用程式」。';
+  } else {
+    help.innerHTML='請用手機的瀏覽器開啟此頁,再從瀏覽器選單選「加到主畫面」。';
+  }
+  help.classList.toggle('show');
+});
+</script>
+</body>
+</html>
