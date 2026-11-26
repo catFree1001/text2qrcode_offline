@@ -1,6 +1,6 @@
 {
-  "name": "QR 產生器",
-  "short_name": "QR",
+  "name": "QR generator",
+  "short_name": "Text2QR Code",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
